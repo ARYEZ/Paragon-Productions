@@ -12,10 +12,13 @@ Then encode with ffmpeg (see README.md).
 import argparse
 import math
 import sys
+import tempfile
+from pathlib import Path
 
 import bpy
 import numpy as np
 from mathutils import Vector
+from PIL import Image
 
 # ---------------------------------------------------------------- settings
 FPS = 24
@@ -25,11 +28,11 @@ GRID = 600                 # plane subdivisions per side (more = crisper depth e
 DEPTH_STRENGTH = 0.32      # how far (in plane-widths/2) near pixels pop toward camera
 FOCAL_MM = 50.0
 START_DISTANCE = 3.4       # camera distance from the plane at frame 1
-END_DISTANCE = 2.75        # ... and at the last frame (push-in)
-SWAY_X = 0.16              # side-to-side camera drift amplitude
-SWAY_Y = 0.06              # vertical drift amplitude
-LOOK_AT = (0.0, 0.08)      # point on the plane the camera aims at (x, y), ~the portal
-OVERSCAN = 0.86            # fraction of the plane visible at frame 1 (<1 hides edges)
+END_DISTANCE = 3.05        # ... and at the last frame (push-in)
+SWAY_X = 0.08              # side-to-side camera drift amplitude
+SWAY_Y = 0.03              # vertical drift amplitude
+LOOK_AT = (0.0, 0.0)       # point on the plane the camera aims at (x, y), ~the portal
+OVERSCAN = 1.0             # fraction of the plane visible at frame 1 (<1 hides edges)
 CYCLES_SAMPLES = 24
 # --------------------------------------------------------------------------
 
@@ -43,8 +46,25 @@ def reset_scene() -> bpy.types.Scene:
     return bpy.context.scene
 
 
+def prefilter_texture(image_path: str) -> str:
+    """Downscale big images to 2x the output height before Blender sees them.
+
+    Cycles samples textures without mipmaps, so fine line art shrunk by much
+    more than 2x shimmers as the camera moves. A Lanczos downscale to ~2x the
+    render size keeps edges crisp and stable.
+    """
+    src = Image.open(image_path).convert("RGB")
+    target_h = RESOLUTION * 2
+    if src.height <= target_h:
+        return image_path
+    target_w = round(src.width * target_h / src.height)
+    out = Path(tempfile.gettempdir()) / f"{Path(image_path).stem}_{target_h}.png"
+    src.resize((target_w, target_h), Image.LANCZOS).save(out)
+    return str(out)
+
+
 def build_plane(image_path: str, depth_path: str) -> tuple[bpy.types.Object, float]:
-    img = bpy.data.images.load(image_path)
+    img = bpy.data.images.load(prefilter_texture(image_path))
     w, h = img.size
     aspect = w / h
 
